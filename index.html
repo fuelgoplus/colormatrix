@@ -1,0 +1,632 @@
+import React, { useState, useMemo } from 'react';
+import { Upload, Sun, Moon, Palette, CheckCircle, AlertCircle, Monitor, FileText, Droplet, Download, PenTool, Code, Presentation, Globe } from 'lucide-react';
+
+/**
+ * STYLES & FONTS
+ * Using Quicksand for Latin/Numbers and Microsoft JhengHei UI for Chinese
+ */
+const FontStyles = () => (
+  <style>
+    {`
+      @import url('https://fonts.googleapis.com/css2?family=Quicksand:wght@300;400;500;600;700&display=swap');
+      body {
+        font-family: 'Quicksand', 'Microsoft JhengHei UI', sans-serif !important;
+      }
+    `}
+  </style>
+);
+
+/**
+ * UTILITIES
+ */
+
+// Convert HEX to RGB
+const hexToRgb = (hex) => {
+  const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+  return result ? {
+    r: parseInt(result[1], 16),
+    g: parseInt(result[2], 16),
+    b: parseInt(result[3], 16)
+  } : null;
+};
+
+// Calculate Luminance for Contrast
+const getLuminance = (r, g, b) => {
+  const a = [r, g, b].map((v) => {
+    v /= 255;
+    return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+  });
+  return a[0] * 0.2126 + a[1] * 0.7152 + a[2] * 0.0722;
+};
+
+// Calculate Contrast Ratio
+const getContrastRatio = (hex1, hex2) => {
+  const rgb1 = hexToRgb(hex1);
+  const rgb2 = hexToRgb(hex2);
+  if (!rgb1 || !rgb2) return null;
+
+  const lum1 = getLuminance(rgb1.r, rgb1.g, rgb1.b);
+  const lum2 = getLuminance(rgb2.r, rgb2.g, rgb2.b);
+
+  const brightest = Math.max(lum1, lum2);
+  const darkest = Math.min(lum1, lum2);
+
+  return (brightest + 0.05) / (darkest + 0.05);
+};
+
+// WCAG Level
+const getWCAGLevel = (ratio) => {
+  if (!ratio) return '';
+  if (ratio >= 7) return 'AAA';
+  if (ratio >= 4.5) return 'AA';
+  if (ratio >= 3) return 'AA Large';
+  return 'Fail';
+};
+
+// Download Helper
+const downloadFile = (content, fileName, contentType) => {
+  const a = document.createElement("a");
+  const file = new Blob([content], { type: contentType });
+  a.href = URL.createObjectURL(file);
+  a.download = fileName;
+  a.click();
+  URL.revokeObjectURL(a.href);
+};
+
+// Helper to extract English text only
+const extractEnglish = (text) => {
+  // 1. Remove non-ASCII characters (Chinese, full-width punctuation, etc.)
+  let clean = text.replace(/[^\x00-\x7F]/g, "");
+  // 2. Remove leading/trailing symbols that might remain (like / or - if they were separators)
+  clean = clean.replace(/^[\s\W]+/, "");
+  // 3. Trim whitespace
+  return clean.trim();
+};
+
+/**
+ * TRANSLATIONS
+ */
+const DICTIONARY = {
+  en: {
+    title: "Color Matrix System",
+    subtitle: "Design System Palette & Accessibility Report",
+    generatedFor: "Generated for: Electronics & Dashboard UI",
+    dragDrop: "Drag & drop your CSV file here to update",
+    orRely: "or rely on the pre-loaded data",
+    base: "Base",
+    usage: "Usage",
+    color: "Color",
+    contrast: "Contrast",
+    note: "Note",
+    vsBg: "vs Background",
+    techNoteTitle: "Technical Note on Contrast",
+    techNoteBody: "Contrast ratios are calculated based on the WCAG 2.1 algorithm using relative luminance. Formula: (L1 + 0.05) / (L2 + 0.05).",
+    techNoteList: [
+      "AA (4.5:1): Minimum for normal text.",
+      "AAA (7:1): Enhanced contrast for long-form reading.",
+      "Large Text (3:1): Acceptable for headlines (18pt+) or bold text (14pt+)."
+    ],
+    previewLabel: "UI Preview"
+  },
+  zh: {
+    title: "色彩矩陣系統",
+    subtitle: "設計系統調色盤與無障礙報告",
+    generatedFor: "專案：電子儀表板介面設計",
+    dragDrop: "拖放 CSV 檔案以更新資料",
+    orRely: "或使用預設資料",
+    base: "基底色",
+    usage: "用途 (Usage)",
+    color: "色碼 (Color)",
+    contrast: "對比度 (Contrast)",
+    note: "說明 (Note)",
+    vsBg: "vs 背景",
+    techNoteTitle: "關於對比度的技術說明",
+    techNoteBody: "對比度是根據 WCAG 2.1 演算法使用相對亮度計算得出。公式：(L1 + 0.05) / (L2 + 0.05)。",
+    techNoteList: [
+      "AA (4.5:1)：一般文字的最低標準。",
+      "AAA (7:1)：適合長時間閱讀的高對比標準。",
+      "大字體 (3:1)：適用於標題 (18pt+) 或粗體文字 (14pt+)。"
+    ],
+    previewLabel: "UI 預覽"
+  }
+};
+
+/**
+ * DATA PROCESSING
+ */
+
+const INITIAL_DATA = [
+  // Light Theme
+  { id: 1, usage: "背景 Background", theme: "Light", hex: "#F0EEE9", note: "Light 背景，Cloud Dancer 暖白底" },
+  { id: 2, usage: "卡片 / 區塊 Panel", theme: "Light", hex: "#E7EAEE", note: "卡片底色，偏冷藍灰，搭配深藍文字" },
+  { id: 3, usage: "主要文字 Title / KPI", theme: "Light", hex: "#2B2B6E", note: "主標題 / KPI 文字，深靛藍，高對比" },
+  { id: 4, usage: "次要文字 Label", theme: "Light", hex: "#7D8090", note: "標籤 / 說明文字，比主文字略淡" },
+  { id: 5, usage: "格線 / 邊框 Grid", theme: "Light", hex: "#AEB4C1", note: "格線與邊框，低干擾藍灰" },
+  { id: 6, usage: "主色 1（Teal / KPI 線）", theme: "Light", hex: "#2B2B6E", note: "主要圖表線 / 柱，同主標深藍" },
+  { id: 7, usage: "主色 2（次要系列）", theme: "Light", hex: "#918A9E", note: "次要圖表系列，柔和灰紫藍" },
+  { id: 8, usage: "正向 Positive", theme: "Light", hex: "#2E8F5A", note: "正向 / 達標用綠" },
+  { id: 9, usage: "警示 Negative", theme: "Light", hex: "#C03939", note: "警示 / 未達標用紅" },
+  { id: 10, usage: "次強調 Accent（黃系 / 暖色）", theme: "Light", hex: "#CCAC8C", note: "暖卡其，用於背景區間或次重點" },
+
+  // Slight-Gray Theme
+  { id: 11, usage: "背景 Background", theme: "Slight-Gray", hex: "#E0DED8", note: "微灰背景，適合長時間閱讀" },
+  { id: 12, usage: "卡片 / 區塊 Panel", theme: "Slight-Gray", hex: "#F5F4F2", note: "卡片底色，比背景略亮" },
+  { id: 13, usage: "主要文字 Title / KPI", theme: "Slight-Gray", hex: "#1A1A1A", note: "主標題 / KPI，接近黑，高對比" },
+  { id: 14, usage: "次要文字 Label", theme: "Slight-Gray", hex: "#444444", note: "標籤 / 說明文字" },
+  { id: 15, usage: "格線 / 邊框 Grid", theme: "Slight-Gray", hex: "#B5B5B5", note: "格線與邊框" },
+  { id: 16, usage: "主色 1（Teal / KPI 線）", theme: "Slight-Gray", hex: "#245B61", note: "主要圖表線 / 柱，深 Teal" },
+  { id: 17, usage: "主色 2（次要系列）", theme: "Slight-Gray", hex: "#32938B", note: "次要圖表系列" },
+  { id: 18, usage: "正向 Positive", theme: "Slight-Gray", hex: "#26764A", note: "正向 / 達標用綠" },
+  { id: 19, usage: "警示 Negative", theme: "Slight-Gray", hex: "#AA2E2E", note: "警示 / 未達標用紅" },
+  { id: 20, usage: "次強調 Accent（黃系 / 暖色）", theme: "Slight-Gray", hex: "#D9A940", note: "黃系強調" },
+
+  // Dark Theme
+  { id: 21, usage: "背景 Background", theme: "Dark", hex: "#DEE6E1", note: "冷淡綠灰背景" },
+  { id: 22, usage: "卡片 / 區塊 Panel", theme: "Dark", hex: "#FCFCFC", note: "卡片底色，接近白" },
+  { id: 23, usage: "主要文字 Title / KPI", theme: "Dark", hex: "#262216", note: "主標題 / KPI，深咖，高對比" },
+  { id: 24, usage: "次要文字 Label", theme: "Dark", hex: "#668177", note: "標籤 / 說明文字" },
+
+  // Presentation System (Updated from User Request V1.2)
+  { id: 30, usage: "Slide Background (BG-01)", theme: "Presentation System", hex: "#FDF5E6", note: "Main slide canvas color" },
+  { id: 31, usage: "Header Background (BG-02)", theme: "Presentation System", hex: "#800080", note: "Top bar/Navigation background" },
+  { id: 32, usage: "Primary Title (TXT-01)", theme: "Presentation System", hex: "#fde453", note: "Main headline color" },
+  { id: 33, usage: "Body Text (TXT-02)", theme: "Presentation System", hex: "#2D2D2D", note: "Standard paragraph text" },
+  { id: 34, usage: "Subtle Label (TXT-03)", theme: "Presentation System", hex: "#A9A9A9", note: "Chart axis labels, footnotes" },
+  { id: 35, usage: "Brand Highlight (ACC-01)", theme: "Presentation System", hex: "#FF0050", note: "Key takeaways, emphasis" },
+  { id: 36, usage: "Chart Series 1 (CH-01)", theme: "Presentation System", hex: "#00FF7F", note: "Primary data bar/line" },
+  { id: 37, usage: "Chart Series 2 (CH-02)", theme: "Presentation System", hex: "#FF8C00", note: "Secondary data bar/line" },
+  { id: 38, usage: "Chart Series 3 (CH-03)", theme: "Presentation System", hex: "#FFD700", note: "Tertiary data bar/line" },
+  { id: 39, usage: "Good / Growth (SEM-POS)", theme: "Presentation System", hex: "#32CD32", note: "Profit/Pass indicators (Green)" },
+  { id: 40, usage: "Bad / Loss (SEM-NEG)", theme: "Presentation System", hex: "#FF4500", note: "Loss/Fail indicators (Red)" }
+];
+
+/**
+ * COMPONENTS
+ */
+
+const ThemePreview = ({ items, lang }) => {
+  // Helper to safely get hex based on usage keywords
+  const getC = (keywords) => {
+    const item = items.find(i => {
+      const u = i.usage.toLowerCase();
+      return Array.isArray(keywords) ? keywords.some(k => u.includes(k)) : u.includes(keywords);
+    });
+    return item ? item.hex : 'transparent';
+  };
+
+  const bg = getC(['background', '背景', 'bg-01']);
+  const panel = getC(['panel', '卡片', '區塊', 'header background', 'bg-02']); 
+  const title = getC(['title', 'kpi', '主要文字', 'primary title', 'headline', 'txt-01']);
+  const label = getC(['label', '次要文字', 'body text', 'subtle label']);
+  const grid = getC(['grid', '格線']);
+  const p1 = getC(['主色 1', 'teal', 'chart series 1']);
+  const p2 = getC(['主色 2', 'chart series 2']);
+  const pos = getC(['positive', '正向', 'good', 'growth']);
+  const neg = getC(['negative', '警示', 'bad', 'loss']);
+  const accent = getC(['accent', '次強調', 'brand highlight']);
+
+  return (
+    <div className="w-full h-44 flex overflow-hidden border-b border-gray-100 relative text-xs" style={{ backgroundColor: bg }}>
+       {/* Decorative Sidebar / Header Strip */}
+       <div className="w-24 md:w-32 h-full flex flex-col p-3 gap-3 border-r shrink-0 transition-colors duration-300" style={{ backgroundColor: panel && panel !== 'transparent' ? panel : 'transparent', borderColor: grid || 'rgba(0,0,0,0.1)' }}>
+          {/* Logo / Nav simulation */}
+          <div className="h-6 w-full rounded opacity-90" style={{ backgroundColor: title, filter: 'contrast(1.2)' }}></div>
+          <div className="h-2 w-1/2 rounded opacity-40 mt-1" style={{ backgroundColor: label, filter: 'brightness(2)' }}></div>
+          
+          <div className="mt-4 flex flex-col gap-2">
+            {[1, 2, 3].map(i => (
+              <div key={i} className="flex items-center gap-2">
+                 <div className="w-2 h-2 rounded-full" style={{ backgroundColor: i===1 ? accent : label, opacity: i===1 ? 1 : 0.3 }}></div>
+                 <div className="h-2 w-12 rounded opacity-40" style={{ backgroundColor: label, filter: 'invert(0.1)' }}></div>
+              </div>
+            ))}
+          </div>
+       </div>
+       
+       {/* Main Dashboard Area */}
+       <div className="flex-1 p-4 flex flex-col gap-4 overflow-hidden">
+          {/* Header Row */}
+          <div className="flex justify-between items-center">
+             <div>
+               <div className="h-4 w-32 rounded mb-1" style={{ backgroundColor: title }}></div>
+               <div className="h-2 w-20 rounded opacity-50" style={{ backgroundColor: label }}></div>
+             </div>
+             <div className="flex gap-2">
+                <div className="h-8 w-8 rounded-full border-2 border-white/50 shadow-sm" style={{ backgroundColor: p1 }}></div>
+                <div className="h-8 w-8 rounded-full border-2 border-white/50 shadow-sm -ml-4" style={{ backgroundColor: accent }}></div>
+             </div>
+          </div>
+          
+          {/* Content Row: Cards */}
+          <div className="flex gap-4 h-full">
+             {/* Stats Card (Chart) */}
+             <div className="flex-1 rounded-lg p-3 flex flex-col justify-between shadow-sm border bg-white/40 backdrop-blur-sm" style={{ borderColor: grid || 'transparent' }}>
+                <div className="flex justify-between items-start">
+                   <div className="h-2 w-10 rounded opacity-60" style={{ backgroundColor: label }}></div>
+                   <div className="h-2 w-2 rounded-full" style={{ backgroundColor: pos }}></div>
+                </div>
+                <div className="h-6 w-16 rounded mt-1" style={{ backgroundColor: title }}></div>
+                <div className="mt-2 flex items-end gap-1 h-12 w-full">
+                   <div className="w-1/4 h-[40%] rounded-t-sm" style={{ backgroundColor: p2 || p1, opacity: 0.5 }}></div>
+                   <div className="w-1/4 h-[70%] rounded-t-sm" style={{ backgroundColor: p2 || p1, opacity: 0.7 }}></div>
+                   <div className="w-1/4 h-[100%] rounded-t-sm" style={{ backgroundColor: p1 }}></div>
+                   <div className="w-1/4 h-[60%] rounded-t-sm" style={{ backgroundColor: p2 || p1, opacity: 0.6 }}></div>
+                </div>
+             </div>
+             
+             {/* Alert Card (Donut) */}
+             <div className="flex-1 rounded-lg p-3 flex flex-col gap-2 shadow-sm border bg-white/40 backdrop-blur-sm" style={{ borderColor: grid || 'transparent' }}>
+                 <div className="flex justify-between">
+                   <div className="h-2 w-12 rounded opacity-60" style={{ backgroundColor: label }}></div>
+                   <div className="h-2 w-2 rounded-full" style={{ backgroundColor: neg }}></div>
+                </div>
+                 <div className="flex-1 rounded flex items-center justify-center relative">
+                    <div className="w-12 h-12 rounded-full border-[6px] opacity-30 absolute" style={{ borderColor: grid || label }}></div>
+                    <div className="w-12 h-12 rounded-full border-[6px] border-t-transparent absolute -rotate-45" style={{ borderColor: p1 }}></div>
+                    <div className="text-[10px] font-bold" style={{ color: title }}>85%</div>
+                 </div>
+             </div>
+             
+             {/* List Card (Hidden on mobile) */}
+             <div className="hidden md:flex flex-1 rounded-lg p-3 flex-col gap-2 shadow-sm border bg-white/40 backdrop-blur-sm" style={{ borderColor: grid || 'transparent' }}>
+                {[1,2,3].map(i => (
+                  <div key={i} className="flex items-center gap-2 border-b pb-2 last:border-0" style={{ borderColor: grid || 'transparent' }}>
+                    <div className="w-2 h-2 rounded-full" style={{ backgroundColor: i===1 ? pos : i===2 ? accent : label }}></div>
+                    <div className="h-2 flex-1 rounded opacity-40" style={{ backgroundColor: label }}></div>
+                  </div>
+                ))}
+             </div>
+          </div>
+       </div>
+
+       {/* Label Overlay */}
+       <div className="absolute bottom-2 right-2 bg-slate-900/80 text-white px-2 py-1 rounded text-[10px] backdrop-blur-md shadow-lg pointer-events-none">
+         {DICTIONARY[lang].previewLabel}
+       </div>
+    </div>
+  );
+};
+
+const ColorRow = ({ item, bgHex, onColorChange, t }) => {
+  const contrast = bgHex ? getContrastRatio(item.hex, bgHex) : null;
+  const level = getWCAGLevel(contrast);
+  
+  const pillTextColor = getContrastRatio(item.hex, '#FFFFFF') > 2.5 ? '#FFFFFF' : '#000000';
+
+  const handleHexChange = (e) => {
+    let val = e.target.value;
+    if (val.length <= 7) {
+        onColorChange(item.id, val);
+    }
+  };
+
+  return (
+    <tr className="border-b border-gray-100 hover:bg-slate-50 transition-colors group">
+      <td className="p-4 text-sm font-semibold text-slate-700">{item.usage}</td>
+      <td className="p-4">
+        <div className="flex items-center space-x-3">
+          <div className="relative group/picker">
+            <input 
+              type="color" 
+              value={item.hex.length === 7 ? item.hex : '#000000'}
+              onChange={(e) => onColorChange(item.id, e.target.value)}
+              className="absolute inset-0 opacity-0 w-full h-full cursor-pointer z-10"
+            />
+             <div 
+              className="w-16 h-10 rounded-lg shadow-sm border border-gray-200 flex items-center justify-center text-[10px] font-bold transition-transform group-hover/picker:scale-105"
+              style={{ backgroundColor: item.hex, color: pillTextColor }}
+            >
+              <PenTool size={12} className="opacity-0 group-hover/picker:opacity-60 transition-opacity" />
+            </div>
+          </div>
+
+          <input 
+            type="text" 
+            value={item.hex}
+            onChange={handleHexChange}
+            className="w-24 text-xs text-slate-500 font-mono border border-transparent hover:border-gray-200 focus:border-blue-400 rounded px-2 py-1 outline-none bg-transparent focus:bg-white transition-all"
+            placeholder="#000000"
+          />
+        </div>
+      </td>
+      <td className="p-4">
+        {contrast ? (
+          <div className="flex flex-col">
+            <div className="flex items-center space-x-2">
+              <span className={`text-sm font-bold ${contrast >= 4.5 ? 'text-green-600' : contrast >= 3 ? 'text-yellow-600' : 'text-red-500'}`}>
+                {contrast.toFixed(2)}:1
+              </span>
+              <span className={`text-[10px] px-1.5 py-0.5 rounded border ${
+                level === 'AAA' ? 'bg-green-50 border-green-200 text-green-700' :
+                level === 'AA' ? 'bg-green-50 border-green-200 text-green-700' :
+                level === 'AA Large' ? 'bg-yellow-50 border-yellow-200 text-yellow-700' :
+                'bg-red-50 border-red-200 text-red-700'
+              }`}>
+                {level || 'Fail'}
+              </span>
+            </div>
+            <span className="text-[10px] text-gray-400">{t.vsBg}</span>
+          </div>
+        ) : (
+          <span className="text-xs text-gray-300">-</span>
+        )}
+      </td>
+      <td className="p-4 text-sm text-slate-600">{item.note}</td>
+    </tr>
+  );
+};
+
+const ThemeSection = ({ themeName, items, onColorChange, lang }) => {
+  const bgItem = items.find(i => i.usage.toLowerCase().includes('background') || i.usage.includes('背景'));
+  const bgHex = bgItem ? bgItem.hex : '#FFFFFF';
+  
+  const Icon = themeName.toLowerCase().includes('light') ? Sun : 
+               themeName.toLowerCase().includes('dark') ? Moon : 
+               themeName.toLowerCase().includes('presentation') ? Presentation : Palette;
+
+  const t = DICTIONARY[lang];
+
+  const handleExportCSV = () => {
+    const headers = [`${t.usage},Theme,Hex,${t.contrast},${t.note}\n`];
+    const rows = items.map(item => {
+       const contrast = bgHex ? getContrastRatio(item.hex, bgHex)?.toFixed(2) : 'N/A';
+       const englishUsage = extractEnglish(item.usage);
+       return `"${englishUsage}","${item.theme}","${item.hex}","${contrast}:1","${item.note}"`;
+    });
+    const content = headers.concat(rows).join("\n");
+    downloadFile(content, `${themeName}_Theme_Colors.csv`, "text/csv");
+  };
+
+  const handleExportMD = () => {
+    const header = `| ${t.usage} | Hex | ${t.contrast} | ${t.note} |\n|---|---|---|---|\n`;
+    const rows = items.map(item => {
+      const contrast = bgHex ? getContrastRatio(item.hex, bgHex)?.toFixed(2) : 'N/A';
+      const englishUsage = extractEnglish(item.usage);
+      return `| ${englishUsage} | \`${item.hex}\` | ${contrast}:1 | ${item.note} |`;
+    }).join("\n");
+    
+    const content = `# ${themeName} Theme Palette\n\n**${t.base}:** \`${bgHex}\`\n\n${header}${rows}`;
+    downloadFile(content, `${themeName}_Theme_Colors.md`, "text/markdown");
+  };
+
+  const handleExportTXT = () => {
+    const rows = items.map(item => {
+      const englishUsage = extractEnglish(item.usage);
+      return `${englishUsage}: ${item.hex}`;
+    }).join("\n");
+    downloadFile(rows, `${themeName}_Theme_Config.txt`, "text/plain");
+  };
+
+  return (
+    <div className="mb-12 bg-white rounded-xl shadow-lg shadow-slate-200/50 border border-gray-200 overflow-hidden">
+      <ThemePreview items={items} lang={lang} />
+
+      <div className="px-6 py-4 border-b border-gray-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white relative z-10" 
+           style={{ borderLeft: `6px solid ${bgHex}` }}>
+        <div className="flex items-center space-x-3">
+          <div className="p-2 bg-gray-50 rounded-lg text-gray-600">
+            <Icon size={20} />
+          </div>
+          <div>
+            <h2 className="text-xl font-bold text-slate-800 tracking-tight">{themeName} Theme</h2>
+          </div>
+        </div>
+        
+        <div className="flex items-center space-x-3">
+           <div className="hidden sm:flex items-center space-x-2 text-sm text-slate-500 mr-4">
+             <span className="inline-block w-3 h-3 rounded-full border border-gray-300" style={{backgroundColor: bgHex}}></span>
+             <span>{t.base}: {bgHex}</span>
+           </div>
+           
+           <div className="flex items-center bg-gray-50 rounded-lg p-1 border border-gray-200">
+             <button onClick={handleExportCSV} className="p-1.5 text-gray-600 hover:text-blue-600 hover:bg-white rounded-md transition-all text-xs flex items-center gap-1 font-bold">
+               <FileText size={14} /> CSV
+             </button>
+             <div className="w-px h-4 bg-gray-200 mx-1"></div>
+             <button onClick={handleExportMD} className="p-1.5 text-gray-600 hover:text-blue-600 hover:bg-white rounded-md transition-all text-xs flex items-center gap-1 font-bold">
+               <Download size={14} /> MD
+             </button>
+             <div className="w-px h-4 bg-gray-200 mx-1"></div>
+             <button onClick={handleExportTXT} className="p-1.5 text-gray-600 hover:text-blue-600 hover:bg-white rounded-md transition-all text-xs flex items-center gap-1 font-bold">
+               <Code size={14} /> TXT
+             </button>
+           </div>
+        </div>
+      </div>
+      
+      <div className="overflow-x-auto">
+        <table className="w-full text-left border-collapse">
+          <thead className="bg-gray-50 text-gray-500 text-xs uppercase tracking-wider font-bold">
+            <tr>
+              <th className="p-4 w-1/4">{t.usage}</th>
+              <th className="p-4 w-1/4">{t.color}</th>
+              <th className="p-4 w-1/5">{t.contrast}</th>
+              <th className="p-4">{t.note}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {items.map((item) => (
+              <ColorRow key={item.id} item={item} bgHex={bgHex} onColorChange={onColorChange} t={t} />
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+};
+
+export default function App() {
+  const [data, setData] = useState(INITIAL_DATA);
+  const [dragActive, setDragActive] = useState(false);
+  const [lang, setLang] = useState('en');
+
+  const t = DICTIONARY[lang];
+
+  const handleColorChange = (id, newHex) => {
+    setData(prevData => prevData.map(item => 
+      item.id === id ? { ...item, hex: newHex } : item
+    ));
+  };
+
+  const groupedData = useMemo(() => {
+    const groups = {};
+    data.forEach(item => {
+      const theme = item.theme || 'Uncategorized';
+      if (!groups[theme]) groups[theme] = [];
+      groups[theme].push(item);
+    });
+    return groups;
+  }, [data]);
+
+  const handleDrag = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.type === "dragenter" || e.type === "dragover") {
+      setDragActive(true);
+    } else if (e.type === "dragleave") {
+      setDragActive(false);
+    }
+  };
+
+  const parseCSV = (text) => {
+    const lines = text.split('\n');
+    const result = [];
+    for (let i = 1; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (!line) continue;
+      const matches = line.match(/(".*?"|[^",\s]+)(?=\s*,|\s*$)/g);
+      
+      if (matches && matches.length >= 3) {
+         const clean = matches.map(m => m.replace(/^"|"$/g, '').replace(/""/g, '"'));
+         // Fallback for different CSV formats
+         if (matches.length === 4 && lines[0].includes('Key')) {
+            result.push({
+               id: Date.now() + i,
+               usage: `${clean[1]} (${clean[0]})`,
+               theme: "Presentation System",
+               hex: clean[3],
+               note: clean[2]
+            });
+         } else {
+             result.push({
+               id: Date.now() + i, 
+               usage: clean[0],
+               theme: clean[1],
+               hex: clean[2],
+               note: clean[3] || ''
+             });
+         }
+      }
+    }
+    if (result.length > 0) {
+        setData(prev => [...prev, ...result]);
+    }
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(false);
+    
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      const file = e.dataTransfer.files[0];
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        if (event.target?.result) parseCSV(event.target.result);
+      };
+      reader.readAsText(file);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-50 text-slate-800 pb-20 selection:bg-blue-100 selection:text-blue-900">
+      <FontStyles />
+      
+      {/* Header */}
+      <header className="bg-white border-b border-gray-200 px-6 py-6 mb-8 sticky top-0 z-50 bg-opacity-90 backdrop-blur-md">
+        <div className="max-w-5xl mx-auto">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="flex items-center gap-3">
+                <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
+                  <Droplet className="text-blue-600" />
+                  {t.title}
+                </h1>
+                <span className="bg-blue-100 text-blue-700 text-xs px-2 py-0.5 rounded-full font-bold">V1.2</span>
+              </div>
+              <p className="text-slate-500 mt-1 font-medium">{t.subtitle}</p>
+            </div>
+            
+            <div className="flex flex-col items-end gap-2">
+               {/* Lang Switch */}
+               <button 
+                  onClick={() => setLang(l => l === 'en' ? 'zh' : 'en')}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 rounded-full text-xs font-bold text-slate-600 transition-colors"
+               >
+                  <Globe size={12} />
+                  {lang === 'en' ? 'English' : '繁體中文'}
+               </button>
+               
+               <div className="hidden md:block text-right text-xs text-gray-400 font-semibold">
+                  <p>{t.generatedFor}</p>
+                  <p>Date: {new Date().toLocaleDateString()}</p>
+               </div>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      {/* Main Content */}
+      <main className="max-w-5xl mx-auto px-6">
+        
+        {/* Upload Area */}
+        <div 
+          className={`mb-10 p-8 rounded-2xl border-2 border-dashed transition-all text-center cursor-pointer
+            ${dragActive ? 'border-blue-500 bg-blue-50' : 'border-gray-300 bg-white hover:border-gray-400'}
+          `}
+          onDragEnter={handleDrag}
+          onDragLeave={handleDrag}
+          onDragOver={handleDrag}
+          onDrop={handleDrop}
+        >
+          <div className="flex flex-col items-center justify-center space-y-3 pointer-events-none">
+            <div className="p-3 bg-blue-100 text-blue-600 rounded-full">
+              <Upload size={24} />
+            </div>
+            <div className="text-sm">
+              <p className="font-bold text-slate-700">{t.dragDrop}</p>
+              <p className="text-slate-400 mt-1">{t.orRely}</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Theme Groups */}
+        {Object.entries(groupedData).map(([theme, items]) => (
+          <ThemeSection 
+            key={theme} 
+            themeName={theme} 
+            items={items} 
+            onColorChange={handleColorChange}
+            lang={lang}
+          />
+        ))}
+
+        {/* Info Footer */}
+        <div className="mt-12 p-6 bg-blue-50 rounded-xl border border-blue-100 flex items-start gap-4">
+          <Monitor className="text-blue-600 shrink-0 mt-1" size={20} />
+          <div>
+            <h3 className="font-bold text-blue-900 mb-2">{t.techNoteTitle}</h3>
+            <p className="text-sm text-blue-800 leading-relaxed mb-2 font-medium">
+              {t.techNoteBody}
+            </p>
+            <ul className="text-sm text-blue-800 list-disc pl-4 space-y-1">
+              {t.techNoteList.map((note, idx) => (
+                <li key={idx}>{note}</li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      </main>
+    </div>
+  );
+}
